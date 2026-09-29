@@ -244,7 +244,7 @@ export default function TextMode() {
   const isStreaming = loading || !!streaming
 
   return (
-    <div className="relative min-h-screen">
+    <div className="relative h-full min-h-0 min-w-0 flex-1 overflow-y-auto">
       {/* Ambient background */}
       <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
         <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-cyan-600/10 blur-[120px]" />
@@ -259,7 +259,7 @@ export default function TextMode() {
         />
       </div>
 
-      <div className="max-w-[1400px] mx-auto p-6 lg:p-8 space-y-6">
+      <div className="mx-auto w-full max-w-[1400px] space-y-6 p-4 sm:p-6 lg:p-8">
         {/* ── Header ──────────────────────────────────────── */}
         <header className="flex items-start justify-between flex-wrap gap-4">
           <div className="flex items-center gap-4">

@@ -9,6 +9,7 @@ import {
   useMemo,
 } from 'react'
 import Link from 'next/link'
+import { UserRound } from 'lucide-react'
 import {
   useRequireProject,
   useCurrentProject,
@@ -19,9 +20,12 @@ import {
   type StudioAsset,
   type AssetKind,
   type Shot,
+  type StoryCharacter,
   VIDEO_MODELS,
+  CHARACTER_PROFILES,
   ASPECTS,
   STYLES,
+  STORY_FORMATS,
   validateFile,
   kindFromMime,
   projectGenerationsToAssets,
@@ -41,11 +45,12 @@ export default function VideoMode() {
   const [aspect, setAspect] = useState<typeof ASPECTS[number]['id']>('16:9')
   const [duration, setDuration] = useState(6)
   const [style, setStyle] = useState<string>('Cinematic')
+  const [storyFormats, setStoryFormats] = useState<string[]>([])
   const [seed, setSeed] = useState<number | ''>('')
   const [characterProfile, setCharacterProfile] = useState({
     enabled: false,
     role: 'any' as 'any' | 'actor' | 'actress',
-    ethnicities: [] as string[],
+    characters: [] as StoryCharacter[],
     notes: '',
   })
 
@@ -121,6 +126,10 @@ export default function VideoMode() {
   const projectAssets = useMemo<StudioAsset[]>(
     () => projectGenerationsToAssets(sourceGenerations as any),
     [sourceGenerations]
+  )
+  const selectedLibraryAssets = useMemo(
+    () => uploads.filter((asset) => asset.source === 'project'),
+    [uploads]
   )
 
   const isBusy = shots.some(
@@ -300,33 +309,6 @@ export default function VideoMode() {
     })
   }
 
-  function buildCharacterCastPrompt(
-    basePrompt: string,
-    profile: typeof characterProfile | undefined
-  ) {
-    if (!basePrompt || !profile?.enabled) return basePrompt
-
-    const roleText =
-      profile.role === 'actor'
-        ? 'male actor'
-        : profile.role === 'actress'
-          ? 'female actress'
-          : 'character'
-
-    const selectedEthnicities = (profile.ethnicities ?? []).filter(Boolean)
-    const ethnicityText =
-      selectedEthnicities.length > 0
-        ? selectedEthnicities.join(', ')
-        : 'any appearance that fits the scene'
-
-    const notes = (profile.notes ?? '').trim()
-    const extra = notes
-      ? ` ${notes}`
-      : ' Only include these traits when they naturally support the story; the narrative does not require them.'
-
-    return `${basePrompt}\n\nCharacter casting: ${roleText} with appearance options: ${ethnicityText}.${extra}`
-  }
-
   // ─────────────────────────────────────────────────────────
   // Shot generation
   // ─────────────────────────────────────────────────────────
@@ -349,6 +331,8 @@ export default function VideoMode() {
       duration,
       aspect,
       style,
+      storyFormats,
+      characters: characterProfile.characters,
     }
 
     setShots((prev) => [...prev, shot])
@@ -359,12 +343,13 @@ export default function VideoMode() {
     try {
       const body = {
         action: 'create',
-        prompt: buildCharacterCastPrompt(shot.prompt, characterProfile),
+        prompt: shot.prompt,
         projectId: currentProjectId,
         model: shot.model,
         aspect: shot.aspect,
         duration: shot.duration,
         style: shot.style,
+        storyFormats: shot.storyFormats,
         seed: seed === '' ? undefined : Number(seed),
         characterProfile,
         ingredients: shot.ingredients.map((i) => ({
@@ -408,8 +393,19 @@ export default function VideoMode() {
               action: 'status',
               videoId,
               projectId: currentProjectId,
-              prompt: shot.prompt,
+              prompt: data.prompt ?? shot.prompt,
               model: shot.model,
+              style: shot.style,
+              storyFormats: shot.storyFormats,
+              aspect: shot.aspect,
+              duration: shot.duration,
+              characterProfile,
+              ingredients: shot.ingredients.map((ingredient) => ({
+                kind: ingredient.kind,
+                url: ingredient.url,
+                name: ingredient.name,
+                generationId: ingredient.generationId,
+              })),
             }),
           })
           const s = await statusRes.json()
@@ -474,6 +470,7 @@ export default function VideoMode() {
     aspect,
     duration,
     style,
+    storyFormats,
     seed,
     characterProfile,
     refreshCurrentProject,
@@ -504,14 +501,14 @@ export default function VideoMode() {
 
   if (!ready && !needsProject) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-neutral-400">
+      <div className="flex h-full min-h-0 items-center justify-center text-neutral-400">
         <div className="w-6 h-6 rounded-full border-2 border-blue-500/30 border-t-blue-500 animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="relative min-h-screen bg-[#05060a] text-neutral-100">
+    <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#05060a] text-neutral-100">
       {/* Ambient background */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-blue-600/10 blur-[120px]" />
@@ -534,10 +531,10 @@ export default function VideoMode() {
         </div>
       )}
 
-      <div className="relative z-10 flex flex-col h-screen">
+      <div className="relative z-10 flex h-full min-h-0 min-w-0 flex-col">
         {/* ── Header ─────────────────────────────────────── */}
         <header className="flex-shrink-0 border-b border-white/5 backdrop-blur-xl bg-white/[0.02]">
-          <div className="flex items-center justify-between px-6 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-3 sm:px-6">
             <div className="flex items-center gap-3 min-w-0">
               <Link
                 href="/generate"
@@ -590,11 +587,11 @@ export default function VideoMode() {
         </header>
 
         {/* ── Body ──────────────────────────────────────── */}
-        <div className="flex-1 grid grid-cols-1 xl:grid-cols-[1fr_340px] overflow-hidden">
+        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[minmax(0,1fr)_340px]">
           {/* ── Left: shot stream + composer ─────────── */}
-          <div className="flex flex-col overflow-hidden min-w-0">
-            <div ref={scrollRef} className="flex-1 overflow-y-auto">
-              <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
+          <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
+            <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+              <div className="mx-auto max-w-4xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
                 {shots.length === 0 && <EmptyState onPick={setPrompt} />}
 
                 {shots.map((shot) => (
@@ -801,53 +798,86 @@ export default function VideoMode() {
 
                             <div className="space-y-2">
                               <p className="text-[10px] uppercase tracking-widest text-neutral-500">
-                                Ethnicity mix
+                                Character avatars
                               </p>
-                              <div className="flex flex-wrap gap-2">
-                                {[
-                                  'Black African',
-                                  'Chinese',
-                                  'Japanese',
-                                  'American',
-                                ].map((ethnicity) => {
-                                  const active =
-                                    characterProfile.ethnicities.includes(
-                                      ethnicity
-                                    )
+                              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                                {CHARACTER_PROFILES.map((profile) => {
+                                  const character = characterProfile.characters.find(
+                                    (item) => item.origin === profile.id
+                                  )
                                   return (
                                     <button
-                                      key={ethnicity}
+                                      key={profile.id}
                                       type="button"
+                                      aria-pressed={Boolean(character)}
                                       onClick={() =>
                                         setCharacterProfile((prev) => {
-                                          const exists =
-                                            prev.ethnicities.includes(
-                                              ethnicity
-                                            )
+                                          const exists = prev.characters.some(
+                                            (item) => item.origin === profile.id
+                                          )
                                           return {
                                             ...prev,
-                                            ethnicities: exists
-                                              ? prev.ethnicities.filter(
-                                                  (item) => item !== ethnicity
+                                            characters: exists
+                                              ? prev.characters.filter(
+                                                  (item) => item.origin !== profile.id
                                                 )
                                               : [
-                                                  ...prev.ethnicities,
-                                                  ethnicity,
+                                                  ...prev.characters,
+                                                  {
+                                                    origin: profile.id,
+                                                    name: `Character ${prev.characters.length + 1}`,
+                                                  },
                                                 ],
                                           }
                                         })
                                       }
-                                      className={`rounded-full px-2.5 py-1.5 text-[10px] transition ${
-                                        active
-                                          ? 'bg-fuchsia-500/15 text-fuchsia-200 border border-fuchsia-400/40'
-                                          : 'bg-white/[0.02] text-neutral-300 border border-white/10 hover:border-white/20'
+                                      className={`flex min-h-20 items-center gap-2 rounded-xl border p-2 text-left transition ${
+                                        character
+                                          ? 'border-fuchsia-400/50 bg-fuchsia-500/10 text-white'
+                                          : 'border-white/10 bg-white/[0.02] text-neutral-300 hover:border-white/20'
                                       }`}
                                     >
-                                      {ethnicity}
+                                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br ${profile.tone}`}>
+                                        <UserRound size={17} aria-hidden="true" />
+                                      </span>
+                                      <span className="min-w-0">
+                                        <span className="block text-[10px] font-medium">{profile.label}</span>
+                                        <span className="block text-[9px] text-neutral-500">
+                                          {character ? 'Selected' : 'Add character'}
+                                        </span>
+                                      </span>
                                     </button>
                                   )
                                 })}
                               </div>
+                              {characterProfile.characters.length > 0 && (
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                  {characterProfile.characters.map((character) => {
+                                    const profile = CHARACTER_PROFILES.find(
+                                      (option) => option.id === character.origin
+                                    )
+                                    return (
+                                      <label key={character.origin} className="space-y-1 text-[10px] text-neutral-500">
+                                        {profile?.label} character name
+                                        <input
+                                          value={character.name}
+                                          onChange={(event) =>
+                                            setCharacterProfile((prev) => ({
+                                              ...prev,
+                                              characters: prev.characters.map((item) =>
+                                                item.origin === character.origin
+                                                  ? { ...item, name: event.target.value }
+                                                  : item
+                                              ),
+                                            }))
+                                          }
+                                          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-neutral-200 outline-none focus:border-blue-500/50"
+                                        />
+                                      </label>
+                                    )
+                                  })}
+                                </div>
+                              )}
                             </div>
 
                             <div className="space-y-2">
@@ -951,6 +981,37 @@ export default function VideoMode() {
                             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none text-xs">
                               ▾
                             </span>
+                          </div>
+                          <div className="space-y-2 pt-2">
+                            <p className="text-[10px] uppercase tracking-widest text-neutral-500">
+                              Story structure
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {STORY_FORMATS.map((format) => {
+                                const selected = storyFormats.includes(format)
+                                return (
+                                  <button
+                                    key={format}
+                                    type="button"
+                                    aria-pressed={selected}
+                                    onClick={() =>
+                                      setStoryFormats((previous) =>
+                                        selected
+                                          ? previous.filter((item) => item !== format)
+                                          : [...previous, format]
+                                      )
+                                    }
+                                    className={`rounded-full border px-2.5 py-1.5 text-[10px] transition ${
+                                      selected
+                                        ? 'border-cyan-400/40 bg-cyan-500/10 text-cyan-200'
+                                        : 'border-white/10 bg-white/[0.02] text-neutral-400 hover:border-white/20'
+                                    }`}
+                                  >
+                                    {format}
+                                  </button>
+                                )
+                              })}
+                            </div>
                           </div>
                         </div>
 
@@ -1057,14 +1118,19 @@ export default function VideoMode() {
         open={libraryOpen}
         onClose={() => setLibraryOpen(false)}
         assets={projectAssets}
+        selectedAssets={selectedLibraryAssets}
         loading={loadingGens}
-        onPick={(a) => {
-          setUploads((prev) => [
-            ...prev,
-            { ...a, id: `lib-${a.id}-${Date.now()}`, source: 'project' },
+        onApply={(selectedAssets) => {
+          setUploads((previous) => [
+            ...previous.filter((asset) => asset.source !== 'project'),
+            ...selectedAssets.map((asset) => ({
+              ...asset,
+              id: `lib-${asset.id}`,
+              source: 'project' as const,
+            })),
           ])
           setLibraryOpen(false)
-          notify(`Added "${a.name}"`)
+          notify(`${selectedAssets.length} library asset${selectedAssets.length === 1 ? '' : 's'} selected`)
         }}
       />
 
@@ -1526,17 +1592,28 @@ function AssetLibraryModal({
   open,
   onClose,
   assets,
-  onPick,
+  selectedAssets,
+  onApply,
   loading = false,
 }: {
   open: boolean
   onClose: () => void
   assets: StudioAsset[]
-  onPick: (a: StudioAsset) => void
+  selectedAssets: StudioAsset[]
+  onApply: (assets: StudioAsset[]) => void
   loading?: boolean
 }) {
   const [filter, setFilter] = useState<AssetKind | 'all'>('all')
   const [q, setQ] = useState('')
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+
+  useEffect(() => {
+    if (open) {
+      setSelectedIds(
+        selectedAssets.map((asset) => asset.generationId ?? asset.id.replace(/^lib-/, ''))
+      )
+    }
+  }, [open, selectedAssets])
 
   if (!open) return null
 
@@ -1561,7 +1638,7 @@ function AssetLibraryModal({
             <div>
               <h3 className="text-sm font-semibold">Project Library</h3>
               <p className="text-[10px] text-neutral-500">
-                Pick any generated asset as an ingredient
+                Select one or more assets for this generation
               </p>
             </div>
           </div>
@@ -1631,9 +1708,27 @@ function AssetLibraryModal({
               {filtered.map((a) => (
                 <button
                   key={a.id}
-                  onClick={() => onPick(a)}
-                  className="group relative rounded-xl overflow-hidden border border-white/10 bg-white/[0.02] hover:border-blue-500/40 transition-all text-left"
+                  type="button"
+                  aria-pressed={selectedIds.includes(a.generationId ?? a.id)}
+                  onClick={() =>
+                    setSelectedIds((previous) => {
+                      const assetId = a.generationId ?? a.id
+                      return previous.includes(assetId)
+                        ? previous.filter((id) => id !== assetId)
+                        : [...previous, assetId]
+                    })
+                  }
+                  className={`group relative overflow-hidden rounded-xl border bg-white/[0.02] text-left transition-all ${
+                    selectedIds.includes(a.generationId ?? a.id)
+                      ? 'border-cyan-400/60 ring-1 ring-cyan-400/30'
+                      : 'border-white/10 hover:border-blue-500/40'
+                  }`}
                 >
+                  {selectedIds.includes(a.generationId ?? a.id) && (
+                    <span className="absolute right-2 top-2 z-10 rounded-full bg-cyan-400 px-1.5 py-0.5 text-[9px] font-semibold text-black">
+                      Selected
+                    </span>
+                  )}
                   <div className="aspect-video bg-black/40 flex items-center justify-center overflow-hidden">
                     {a.kind === 'image' && (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -1676,6 +1771,34 @@ function AssetLibraryModal({
               ))}
             </div>
           )}
+        </div>
+        <div className="flex items-center justify-between border-t border-white/5 px-5 py-3">
+          <span className="text-[10px] font-mono text-neutral-500">
+            {selectedIds.length} selected
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-white/10 px-3 py-2 text-xs text-neutral-300 hover:bg-white/5"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() =>
+                onApply(
+                  assets.filter((asset) =>
+                    selectedIds.includes(asset.generationId ?? asset.id)
+                  )
+                )
+              }
+              className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-medium text-black disabled:opacity-40"
+            >
+              Use selected
+            </button>
+          </div>
         </div>
       </div>
     </div>

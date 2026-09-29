@@ -284,14 +284,14 @@ export default function AudioMode() {
   const meta = ACTION_META[action]
 
   return (
-    <div className="relative">
+    <div className="relative h-full min-h-0 min-w-0 flex-1 overflow-y-auto">
       {/* Ambient */}
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
         <div className="absolute -top-32 -left-32 w-[500px] h-[500px] rounded-full bg-cyan-600/10 blur-[120px]" />
         <div className="absolute top-1/4 right-0 w-[400px] h-[400px] rounded-full bg-fuchsia-600/10 blur-[120px]" />
       </div>
 
-      <div className="space-y-6">
+      <div className="min-w-0 space-y-6 px-4 py-5 sm:px-6 lg:p-8">
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-3">

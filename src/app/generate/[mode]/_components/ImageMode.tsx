@@ -213,10 +213,10 @@ export default function ImageMode() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
       {/* ── Top bar ──────────────────────────────────────── */}
       <header className="flex-shrink-0 border-b border-border bg-background/80 backdrop-blur z-20">
-        <div className="flex items-center justify-between px-6 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-3 sm:px-6">
           <div className="flex items-center gap-3 min-w-0">
             <Link
               href="/generate"
@@ -249,8 +249,8 @@ export default function ImageMode() {
       </header>
 
       {/* ── Scroll area: centered chat ──────────────────── */}
-      <div className="flex-1 overflow-y-auto" ref={scrollRef}>
-        <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
+      <div className="min-h-0 flex-1 overflow-y-auto" ref={scrollRef}>
+        <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
           {/* Empty state */}
           {messages.length === 0 && (
             <div className="text-center py-16 space-y-4">
@@ -303,7 +303,7 @@ export default function ImageMode() {
 
       {/* ── Sticky composer ─────────────────────────────── */}
       <div className="border-t border-border bg-background/95 backdrop-blur">
-        <div className="max-w-3xl mx-auto px-6 py-4 space-y-3">
+        <div className="mx-auto max-w-3xl space-y-3 px-3 py-4 sm:px-6">
           {referenceUrl && (
             <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}

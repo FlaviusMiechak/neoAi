@@ -7,6 +7,56 @@ import type { Generation } from '@/lib/useCurrentProject'
 
 export type AssetKind = 'image' | 'video' | 'audio' | 'text'
 export type SourceKind = 'upload' | 'project'
+export type CharacterOrigin =
+  | 'black-african'
+  | 'chinese'
+  | 'japanese'
+  | 'american'
+
+export interface StoryCharacter {
+  origin: CharacterOrigin
+  name: string
+}
+
+export const CHARACTER_PROFILES = [
+  {
+    id: 'black-african',
+    label: 'Black African',
+    prompt: 'Black African heritage; portray as an individual, not a stereotype.',
+    tone: 'from-amber-500/30 to-rose-700/40',
+  },
+  {
+    id: 'chinese',
+    label: 'Chinese',
+    prompt: 'Chinese heritage; portray as an individual, not a stereotype.',
+    tone: 'from-red-500/30 to-amber-700/40',
+  },
+  {
+    id: 'japanese',
+    label: 'Japanese',
+    prompt: 'Japanese heritage; portray as an individual, not a stereotype.',
+    tone: 'from-pink-500/30 to-slate-600/40',
+  },
+  {
+    id: 'american',
+    label: 'American',
+    prompt: 'American background; appearance is not restricted to one ethnicity.',
+    tone: 'from-blue-500/30 to-red-700/40',
+  },
+] as const satisfies readonly {
+  id: CharacterOrigin
+  label: string
+  prompt: string
+  tone: string
+}[]
+
+export const STORY_FORMATS = [
+  'Storyline',
+  'Episode',
+  'Scene',
+  'Chapter',
+  'Tales',
+] as const
 
 export interface StudioAsset {
   id: string
@@ -39,6 +89,8 @@ export interface Shot {
   duration: number
   aspect: '16:9' | '9:16' | '1:1' | '21:9'
   style?: string
+  storyFormats?: string[]
+  characters?: StoryCharacter[]
 }
 
 export interface RemoteGeneration {

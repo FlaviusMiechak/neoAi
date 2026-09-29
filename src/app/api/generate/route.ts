@@ -10,6 +10,7 @@ import type { AudioSubMode } from '@/lib/generation-types'
 
 import { getUserIdFromRequest } from '@/lib/auth'
 import { EdgeTTS } from 'edge-tts-universal'
+import { CHARACTER_PROFILES } from '@/lib/video-studio'
 
 const AGNES_BASE = 'https://apihub.agnes-ai.com'
 
@@ -19,31 +20,69 @@ function buildCharacterCastPrompt(
   characterProfile?: {
     enabled?: boolean
     role?: 'any' | 'actor' | 'actress'
-    ethnicities?: string[]
+    characters?: { origin: string; name: string }[]
     notes?: string
-  }
+  },
+  style?: string,
+  storyFormats?: string[],
+  ingredients?: { kind: string; name: string }[]
 ) {
-  if (!basePrompt || !characterProfile?.enabled) return basePrompt
+  const setup: string[] = []
 
-  const roleText =
-    characterProfile.role === 'actor'
-      ? 'male actor'
-      : characterProfile.role === 'actress'
-        ? 'female actress'
-        : 'character'
+  if (style) setup.push(`Visual style: ${style}.`)
 
-  const selectedEthnicities = (characterProfile.ethnicities ?? []).filter(Boolean)
-  const ethnicityText =
-    selectedEthnicities.length > 0
-      ? selectedEthnicities.join(', ')
-      : 'any appearance that fits the scene'
+  const formatGuidance: Record<string, string> = {
+    Storyline: 'Use a coherent narrative progression with a clear beginning, development, and payoff.',
+    Episode: 'Shape this as an episode with an engaging opening, a focused arc, and a satisfying beat.',
+    Scene: 'Keep this as one focused, visually continuous scene.',
+    Chapter: 'Treat this as a chapter in a continuing story and preserve continuity.',
+    Tales: 'Use the imaginative, memorable tone of a tale without adding a moral unless requested.',
+  }
+  const selectedFormats = (storyFormats ?? []).filter((format) =>
+    Object.hasOwn(formatGuidance, format)
+  )
+  if (selectedFormats.length) {
+    setup.push(
+      `Story structure (${selectedFormats.join(', ')}): ${selectedFormats
+        .map((format) => formatGuidance[format])
+        .join(' ')}`
+    )
+  }
 
-  const noteText = (characterProfile.notes ?? '').trim()
-  const castNote = noteText
-    ? ` ${noteText}`
-    : ' Keep the cast flexible and only include these traits when they naturally fit the story.'
+  if (characterProfile?.enabled) {
+    const roleText =
+      characterProfile.role === 'actor'
+        ? 'male-presenting character'
+        : characterProfile.role === 'actress'
+          ? 'female-presenting character'
+          : 'character'
+    const cast = (characterProfile.characters ?? []).flatMap((character, index) => {
+      const profile = CHARACTER_PROFILES.find((option) => option.id === character.origin)
+      if (!profile) return []
+      const name = character.name.trim() || `Character ${index + 1}`
+      return [`${name} is a distinct ${roleText} with ${profile.prompt}`]
+    })
 
-  return `${basePrompt}\n\nCharacter casting: ${roleText} with appearance options: ${ethnicityText}.${castNote}`
+    if (cast.length) {
+      setup.push(
+        `Distinct recurring cast: ${cast.join(' ')} Keep each selected character visually consistent and separate throughout the video.`
+      )
+    }
+
+    const notes = characterProfile.notes?.trim()
+    if (notes) setup.push(`Character direction: ${notes}`)
+  }
+
+  if (ingredients?.length) {
+    const descriptions = ingredients.map(
+      (ingredient) => `${ingredient.kind}: ${ingredient.name}`
+    )
+    setup.push(
+      `Project library and uploaded reference assets: ${descriptions.join('; ')}. Use these as visual or story context where appropriate.`
+    )
+  }
+
+  return [basePrompt, ...setup].filter(Boolean).join('\n\n')
 }
 
 export async function POST(request: NextRequest) {
@@ -70,6 +109,11 @@ export async function POST(request: NextRequest) {
     projectId,
     voice,
     characterProfile,
+    style,
+    storyFormats,
+    ingredients,
+    aspect,
+    duration,
   } = body
 
   // ── 3. Project required ────────────────────────────────────
@@ -359,7 +403,36 @@ if (action === 'audio') {
   // VIDEO: CREATE
   // ────────────────────────────────────────────────────────────
   if (action === 'create') {
-    const finalPrompt = buildCharacterCastPrompt(prompt, characterProfile)
+    const selectedIngredients = Array.isArray(ingredients)
+      ? ingredients.filter(
+          (item: any) =>
+            item &&
+            typeof item.kind === 'string' &&
+            typeof item.name === 'string' &&
+            typeof item.url === 'string'
+        )
+      : []
+    const finalPrompt = buildCharacterCastPrompt(
+      prompt,
+      characterProfile,
+      style,
+      storyFormats,
+      selectedIngredients
+    )
+    const referenceImage = selectedIngredients.find(
+      (item: any) => item.kind === 'image'
+    )?.url
+    const dimensionsByAspect: Record<string, { width: number; height: number }> = {
+      '16:9': { width: 1152, height: 648 },
+      '9:16': { width: 648, height: 1152 },
+      '1:1': { width: 1024, height: 1024 },
+      '21:9': { width: 1260, height: 540 },
+    }
+    const dimensions = dimensionsByAspect[aspect] ?? dimensionsByAspect['16:9']
+    const frameRate = 10
+    const videoDuration = Number.isFinite(Number(duration))
+      ? Math.min(16, Math.max(2, Number(duration)))
+      : 6
 
     const res = await fetch(`${AGNES_BASE}/v1/videos`, {
       method: 'POST',
@@ -367,10 +440,10 @@ if (action === 'audio') {
       body: JSON.stringify({
         model: model || 'agnes-video-v2.0',
         prompt: finalPrompt,
-        height: 768,
-        width: 1152,
-        num_frames: 441,
-        frame_rate: 10,
+        ...(referenceImage ? { image: referenceImage, mode: 'ti2vid' } : {}),
+        ...dimensions,
+        num_frames: videoDuration * frameRate,
+        frame_rate: frameRate,
       }),
     })
     const data = await res.json()
@@ -383,6 +456,7 @@ if (action === 'audio') {
       videoId: extractedVideoId,
       status: data.status,
       progress: data.progress,
+      prompt: finalPrompt,
     })
   }
 
@@ -427,6 +501,18 @@ if (action === 'audio') {
             model: model || 'agnes-video-v2.0',
             videoId,
             status: 'completed',
+            style: style ?? null,
+            storyFormats: storyFormats ?? [],
+            aspect: aspect ?? null,
+            duration: duration ?? null,
+            characterProfile: characterProfile ?? null,
+            ingredients: Array.isArray(ingredients)
+              ? ingredients.map(({ kind, name, generationId }: any) => ({
+                  kind,
+                  name,
+                  generationId,
+                }))
+              : [],
           },
         })
       }
