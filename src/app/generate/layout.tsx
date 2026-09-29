@@ -1,5 +1,5 @@
 // app/generate/layout.tsx  (server component — no 'use client')
-import TopBar from '@/components/jTopBar'
+import TopBar from '@/components/TopBar'
 import LeftSidebar from '@/components/LeftSidebar'
 import { getCurrentUser } from '@/lib/auth'
 

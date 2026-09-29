@@ -111,7 +111,8 @@ export default function Main() {
     }
   }
 
-  const showSuggestions = messages.length === 0
+  const visibleMessages = messages.filter((message) => message.role !== 'system')
+  const showSuggestions = visibleMessages.length === 0
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#08090d] text-white">
@@ -146,7 +147,7 @@ export default function Main() {
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-8 sm:px-6 sm:py-10"
       >
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-7">
-          {messages.length === 0 && (
+          {visibleMessages.length === 0 && (
             <div className="flex min-h-[260px] flex-col items-center justify-center py-10 text-center">
               <div className="mb-5 grid h-16 w-16 place-items-center rounded-3xl border border-indigo-400/15 bg-gradient-to-br from-indigo-500/15 to-blue-500/[0.04] text-indigo-300 shadow-lg shadow-indigo-500/[0.05]">
                 <span className="scale-150">
@@ -165,7 +166,7 @@ export default function Main() {
             </div>
           )}
 
-          {messages.map((message, index) => (
+          {visibleMessages.map((message, index) => (
             <MessageBubble
               key={index}
               message={message}
@@ -173,7 +174,7 @@ export default function Main() {
           ))}
 
           {isStreaming &&
-            messages[messages.length - 1]?.content === '' && (
+            visibleMessages[visibleMessages.length - 1]?.content === '' && (
               <div
                 className="flex items-center gap-3 pl-1"
                 role="status"
