@@ -720,7 +720,9 @@ export function Main() {
     }
   }
 
-  const visibleMessages = messages.filter((message) => message.role !== 'system')
+  const visibleMessages = messages.filter(
+    (message): message is ChatMessage => message.role !== 'system',
+  )
   const showSuggestions = visibleMessages.length === 0
 
   return (

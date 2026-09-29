@@ -21,13 +21,7 @@ export default async function GenerateLayout({
       />
 
       <div className="flex min-h-0 min-w-0 flex-1">
-        <LeftSidebar
-          user={
-            user
-              ? { id: user.id, email: user.email, name: user.name }
-              : null
-          }
-        />
+        <LeftSidebar />
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {children}
