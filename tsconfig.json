@@ -15,9 +15,12 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "incremental": true,
-    "types":["react", "react-dom"],
+    "types": [
+      "react",
+      "react-dom"
+    ],
     "plugins": [
       {
         "name": "next"
@@ -25,7 +28,9 @@
     ],
     "paths": {
       "@/*": [
-        "./*", "./lib/", "/lib"
+        "./*",
+        "./lib/",
+        "/lib"
       ]
     },
     "target": "ES2017"
@@ -34,8 +39,8 @@
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
-     "**/*.js",
-     "**/*.jsx",
+    "**/*.js",
+    "**/*.jsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],

@@ -1,5 +1,6 @@
 // src/app/api/generate/route.ts
 import { NextRequest, NextResponse } from 'next/server'
+import { randomUUID } from 'node:crypto'
 import { getProject } from '@/lib/projects'
 import {
   addGeneration,
@@ -14,6 +15,62 @@ import { CHARACTER_PROFILES } from '@/lib/video-studio'
 
 const AGNES_BASE = 'https://apihub.agnes-ai.com'
 
+// ── Long-video constants ──────────────────────────────────
+const TARGET_DURATION_SEC = 6 * 60  // 6 minutes
+const CLIP_DURATION_SEC   = 18       // 441 frames @ 24 fps ≈ 18.4s
+
+const DIMENSIONS_BY_ASPECT: Record<string, { width: number; height: number }> = {
+  '16:9': { width: 1152, height: 648 },
+  '9:16': { width: 648,  height: 1152 },
+  '1:1':  { width: 1024, height: 1024 },
+  '21:9': { width: 1260, height: 540 },
+}
+
+function shotCountForTarget(targetSec = TARGET_DURATION_SEC) {
+  return Math.max(1, Math.ceil(targetSec / CLIP_DURATION_SEC))
+}
+
+async function splitPromptIntoShots(
+  basePrompt: string,
+  shotCount: number,
+  auth: Record<string, string>
+): Promise<string[]> {
+  try {
+    const res = await fetch(`${AGNES_BASE}/v1/chat/completions`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({
+        model: 'agnes-2.0-flash',
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are a storyboard writer. Split the user prompt into N sequential visual shots. ' +
+              'Each shot must be a self-contained video-generation prompt (subject, action, camera, lighting). ' +
+              'Return ONLY a JSON array of strings, no markdown, no commentary.',
+          },
+          {
+            role: 'user',
+            content: `Split into exactly ${shotCount} shots.\n\nPROMPT:\n${basePrompt}`,
+          },
+        ],
+      }),
+    })
+    const data = await res.json()
+    const text: string = data.choices?.[0]?.message?.content ?? '[]'
+    const cleaned = text.replace(/```json|```/g, '').trim()
+    const arr = JSON.parse(cleaned)
+    if (Array.isArray(arr) && arr.length) {
+      return arr.slice(0, shotCount).map((s) => String(s))
+    }
+  } catch (err) {
+    console.error('[create-long] shot split failed:', err)
+  }
+  // Fallback: repeat base prompt with shot suffixes
+  return Array.from({ length: shotCount }, (_, i) =>
+    `${basePrompt}\n\n(Shot ${i + 1} of ${shotCount}; continuous story, consistent characters and style.)`
+  )
+}
 
 function buildCharacterCastPrompt(
   basePrompt: string,
@@ -246,161 +303,158 @@ export async function POST(request: NextRequest) {
   }
 
   // Voice map — extend as needed. Key = client `voice` id, value = Edge voice name.
-const EDGE_VOICE_MAP: Record<string, string> = {
-  aria: 'en-US-AriaNeural',
-  atlas: 'en-US-GuyNeural',
-  nova: 'en-US-JennyNeural',
-  orion: 'en-US-DavisNeural',
-  luna: 'en-US-MichelleNeural',
-  echo: 'en-US-EricNeural',
-}
-
-// Language map → default voice per language (used when voice is generic)
-const EDGE_LANG_DEFAULT: Record<string, string> = {
-  'English (US)': 'en-US-AriaNeural',
-  'English (UK)': 'en-GB-SoniaNeural',
-  Spanish: 'es-ES-ElviraNeural',
-  French: 'fr-FR-DeniseNeural',
-  German: 'de-DE-KatjaNeural',
-  Italian: 'it-IT-ElsaNeural',
-  Portuguese: 'pt-BR-FranciscaNeural',
-  Japanese: 'ja-JP-NanamiNeural',
-  Korean: 'ko-KR-SunHiNeural',
-  Mandarin: 'zh-CN-XiaoxiaoNeural',
-  Hindi: 'hi-IN-SwaraNeural',
-  Arabic: 'ar-SA-ZariyahNeural',
-  Russian: 'ru-RU-SvetlanaNeural',
-}
-
-function resolveEdgeVoice(
-  voiceId: string | undefined,
-  language: string | undefined
-): string {
-  if (voiceId && EDGE_VOICE_MAP[voiceId]) return EDGE_VOICE_MAP[voiceId]
-  if (language && EDGE_LANG_DEFAULT[language]) return EDGE_LANG_DEFAULT[language]
-  return 'en-US-AriaNeural'
-}
-
-function toRatePercent(speed: number | undefined): string {
-  // speed: 0.5..2 → '+/-N%'  (Edge accepts e.g. '+50%' or '-25%')
-  if (!speed || speed === 1) return '+0%'
-  const pct = Math.round((speed - 1) * 100)
-  return `${pct >= 0 ? '+' : ''}${pct}%`
-}
-
-function toPitchHz(pitch: number | undefined): string {
-  // pitch: -12..12 semitones → roughly '+/-NHz'
-  if (!pitch) return '+0Hz'
-  const hz = Math.round(pitch * 5)
-  return `${hz >= 0 ? '+' : ''}${hz}Hz`
-}
-
-// ────────────────────────────────────────────────────────────
-// AUDIO (Edge TTS, sub-mode aware)
-// ────────────────────────────────────────────────────────────
-if (action === 'audio') {
-  const {
-    mode: subMode = 'tts',
-    language,
-    speed,
-    pitch,
-    stability,
-    duration,
-    style,
-    loop,
-  } = body as {
-    mode?: AudioSubMode
-    language?: string
-    speed?: number
-    pitch?: number
-    stability?: number
-    duration?: number
-    style?: string
-    loop?: boolean
+  const EDGE_VOICE_MAP: Record<string, string> = {
+    aria: 'en-US-AriaNeural',
+    atlas: 'en-US-GuyNeural',
+    nova: 'en-US-JennyNeural',
+    orion: 'en-US-DavisNeural',
+    luna: 'en-US-MichelleNeural',
+    echo: 'en-US-EricNeural',
   }
 
-  // voice-clone requires a reference upload
-  let referenceFile: File | null = null
-  const contentType = request.headers.get('content-type') ?? ''
-  if (contentType.includes('multipart/form-data')) {
-    const form = await request.formData()
-    const ref = form.get('reference')
-    if (ref instanceof File) referenceFile = ref
+  // Language map → default voice per language (used when voice is generic)
+  const EDGE_LANG_DEFAULT: Record<string, string> = {
+    'English (US)': 'en-US-AriaNeural',
+    'English (UK)': 'en-GB-SoniaNeural',
+    Spanish: 'es-ES-ElviraNeural',
+    French: 'fr-FR-DeniseNeural',
+    German: 'de-DE-KatjaNeural',
+    Italian: 'it-IT-ElsaNeural',
+    Portuguese: 'pt-BR-FranciscaNeural',
+    Japanese: 'ja-JP-NanamiNeural',
+    Korean: 'ko-KR-SunHiNeural',
+    Mandarin: 'zh-CN-XiaoxiaoNeural',
+    Hindi: 'hi-IN-SwaraNeural',
+    Arabic: 'ar-SA-ZariyahNeural',
+    Russian: 'ru-RU-SvetlanaNeural',
   }
 
-  if (subMode === 'voice-clone' && !referenceFile) {
-    return NextResponse.json(
-      { error: 'Voice clone requires a reference audio file.' },
-      { status: 400 }
-    )
+  function resolveEdgeVoice(
+    voiceId: string | undefined,
+    language: string | undefined
+  ): string {
+    if (voiceId && EDGE_VOICE_MAP[voiceId]) return EDGE_VOICE_MAP[voiceId]
+    if (language && EDGE_LANG_DEFAULT[language]) return EDGE_LANG_DEFAULT[language]
+    return 'en-US-AriaNeural'
   }
 
-  if (!prompt || !prompt.trim()) {
-    return NextResponse.json(
-      { error: 'Prompt (text to speak) is required.' },
-      { status: 400 }
-    )
+  function toRatePercent(speed: number | undefined): string {
+    if (!speed || speed === 1) return '+0%'
+    const pct = Math.round((speed - 1) * 100)
+    return `${pct >= 0 ? '+' : ''}${pct}%`
   }
 
-  try {
-    const edgeVoice = resolveEdgeVoice(voice, language)
-
-    const tts = new EdgeTTS(prompt, edgeVoice, {
-      rate: toRatePercent(speed),
-      volume: '+0%',
-      pitch: toPitchHz(pitch),
-    })
-
-    const result = await tts.synthesize()
-
-    const rawAudio: any =
-      (result as any).audio ?? (result as any).data ?? result
-    const buffer = Buffer.isBuffer(rawAudio)
-      ? rawAudio
-      : rawAudio?.arrayBuffer
-        ? Buffer.from(await rawAudio.arrayBuffer())
-        : Buffer.from(rawAudio)
-
-    const base64 = buffer.toString('base64')
-    const dataUrl = `data:audio/mp3;base64,${base64}`
-
-    // ── Persist ────────────────────────────────────────────
-    await addGeneration(userId, projectId, {
-      mode: 'audio',
-      prompt,
-      result: dataUrl,
-      metadata: {
-        provider: 'edge-tts',
-        submode: subMode,
-        voice: edgeVoice,
-        language: language ?? null,
-        speed: speed ?? 1,
-        pitch: pitch ?? 0,
-        stability: stability ?? null,
-        duration: duration ?? null,
-        style: style ?? null,
-        loop: loop ?? false,
-        hasReference: !!referenceFile,
-      },
-    })
-
-    return NextResponse.json({
-      url: dataUrl,
-      projectId,
-      mode: subMode,
-      voice: edgeVoice,
-    })
-  } catch (err: any) {
-    console.error('[audio] Edge TTS error:', err)
-    return NextResponse.json(
-      { error: err?.message || 'Audio synthesis failed' },
-      { status: 500 }
-    )
+  function toPitchHz(pitch: number | undefined): string {
+    if (!pitch) return '+0Hz'
+    const hz = Math.round(pitch * 5)
+    return `${hz >= 0 ? '+' : ''}${hz}Hz`
   }
-}
 
   // ────────────────────────────────────────────────────────────
-  // VIDEO: CREATE
+  // AUDIO (Edge TTS, sub-mode aware)
+  // ────────────────────────────────────────────────────────────
+  if (action === 'audio') {
+    const {
+      mode: subMode = 'tts',
+      language,
+      speed,
+      pitch,
+      stability,
+      duration: audioDuration,
+      style: audioStyle,
+      loop,
+    } = body as {
+      mode?: AudioSubMode
+      language?: string
+      speed?: number
+      pitch?: number
+      stability?: number
+      duration?: number
+      style?: string
+      loop?: boolean
+    }
+
+    // voice-clone requires a reference upload
+    let referenceFile: File | null = null
+    const contentType = request.headers.get('content-type') ?? ''
+    if (contentType.includes('multipart/form-data')) {
+      const form = await request.formData()
+      const ref = form.get('reference')
+      if (ref instanceof File) referenceFile = ref
+    }
+
+    if (subMode === 'voice-clone' && !referenceFile) {
+      return NextResponse.json(
+        { error: 'Voice clone requires a reference audio file.' },
+        { status: 400 }
+      )
+    }
+
+    if (!prompt || !prompt.trim()) {
+      return NextResponse.json(
+        { error: 'Prompt (text to speak) is required.' },
+        { status: 400 }
+      )
+    }
+
+    try {
+      const edgeVoice = resolveEdgeVoice(voice, language)
+
+      const tts = new EdgeTTS(prompt, edgeVoice, {
+        rate: toRatePercent(speed),
+        volume: '+0%',
+        pitch: toPitchHz(pitch),
+      })
+
+      const result = await tts.synthesize()
+
+      const rawAudio: any =
+        (result as any).audio ?? (result as any).data ?? result
+      const buffer = Buffer.isBuffer(rawAudio)
+        ? rawAudio
+        : rawAudio?.arrayBuffer
+          ? Buffer.from(await rawAudio.arrayBuffer())
+          : Buffer.from(rawAudio)
+
+      const base64 = buffer.toString('base64')
+      const dataUrl = `data:audio/mp3;base64,${base64}`
+
+      await addGeneration(userId, projectId, {
+        mode: 'audio',
+        prompt,
+        result: dataUrl,
+        metadata: {
+          provider: 'edge-tts',
+          submode: subMode,
+          voice: edgeVoice,
+          language: language ?? null,
+          speed: speed ?? 1,
+          pitch: pitch ?? 0,
+          stability: stability ?? null,
+          duration: audioDuration ?? null,
+          style: audioStyle ?? null,
+          loop: loop ?? false,
+          hasReference: !!referenceFile,
+        },
+      })
+
+      return NextResponse.json({
+        url: dataUrl,
+        projectId,
+        mode: subMode,
+        voice: edgeVoice,
+      })
+    } catch (err: any) {
+      console.error('[audio] Edge TTS error:', err)
+      return NextResponse.json(
+        { error: err?.message || 'Audio synthesis failed' },
+        { status: 500 }
+      )
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // VIDEO: CREATE (single clip)
   // ────────────────────────────────────────────────────────────
   if (action === 'create') {
     const selectedIngredients = Array.isArray(ingredients)
@@ -422,17 +476,7 @@ if (action === 'audio') {
     const referenceImage = selectedIngredients.find(
       (item: any) => item.kind === 'image'
     )?.url
-    const dimensionsByAspect: Record<string, { width: number; height: number }> = {
-      '16:9': { width: 1152, height: 648 },
-      '9:16': { width: 648, height: 1152 },
-      '1:1': { width: 1024, height: 1024 },
-      '21:9': { width: 1260, height: 540 },
-    }
-    const dimensions = dimensionsByAspect[aspect] ?? dimensionsByAspect['16:9']
-    const frameRate = 10
-    const videoDuration = Number.isFinite(Number(duration))
-      ? Math.min(16, Math.max(2, Number(duration)))
-      : 6
+    const dimensions = DIMENSIONS_BY_ASPECT[aspect] ?? DIMENSIONS_BY_ASPECT['16:9']
 
     const res = await fetch(`${AGNES_BASE}/v1/videos`, {
       method: 'POST',
@@ -442,8 +486,8 @@ if (action === 'audio') {
         prompt: finalPrompt,
         ...(referenceImage ? { image: referenceImage, mode: 'ti2vid' } : {}),
         ...dimensions,
-        num_frames: videoDuration * frameRate,
-        frame_rate: frameRate,
+        num_frames: 441,
+        frame_rate: 24,
       }),
     })
     const data = await res.json()
@@ -461,7 +505,79 @@ if (action === 'audio') {
   }
 
   // ────────────────────────────────────────────────────────────
-  // VIDEO: STATUS
+  // VIDEO: CREATE-LONG (batch of clips for long-form)
+  // ────────────────────────────────────────────────────────────
+  if (action === 'create-long') {
+    const targetSec = Number(duration) || TARGET_DURATION_SEC
+    const shotCount = shotCountForTarget(targetSec)
+
+    const finalPrompt = buildCharacterCastPrompt(
+      prompt,
+      characterProfile,
+      style,
+      storyFormats,
+      ingredients
+    )
+
+    const shots = await splitPromptIntoShots(finalPrompt, shotCount, auth)
+
+    const dimensions = DIMENSIONS_BY_ASPECT[aspect] ?? DIMENSIONS_BY_ASPECT['16:9']
+
+    // Fire off all clips in parallel
+    const jobs = await Promise.all(
+      shots.map(async (shotPrompt, i) => {
+        try {
+          const res = await fetch(`${AGNES_BASE}/v1/videos`, {
+            method: 'POST',
+            headers: auth,
+            body: JSON.stringify({
+              model: model || 'agnes-video-v2.0',
+              prompt: shotPrompt,
+              ...dimensions,
+              num_frames: 441,
+              frame_rate: 24,
+            }),
+          })
+          const data = await res.json()
+          if (!res.ok) {
+            return { index: i, error: data, prompt: shotPrompt }
+          }
+          const id = data.video_id ?? data.id ?? data.task_id ?? data.videoId
+          return { index: i, videoId: id, prompt: shotPrompt }
+        } catch (err: any) {
+          return { index: i, error: err?.message ?? 'request failed', prompt: shotPrompt }
+        }
+      })
+    )
+
+    const batchId = randomUUID()
+
+    await addGeneration(userId, projectId, {
+      mode: 'video-batch',
+      prompt: finalPrompt,
+      result: batchId,
+      metadata: {
+        batchId,
+        targetSec,
+        shotCount,
+        jobs,
+        aspect: aspect ?? '16:9',
+        model: model || 'agnes-video-v2.0',
+        status: 'processing',
+      },
+    })
+
+    return NextResponse.json({
+      batchId,
+      jobs,
+      targetSec,
+      shotCount,
+      clipDurationSec: CLIP_DURATION_SEC,
+    })
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // VIDEO: STATUS (single clip)
   // ────────────────────────────────────────────────────────────
   if (action === 'status') {
     const url = new URL(`${AGNES_BASE}/agnesapi`)
@@ -536,6 +652,80 @@ if (action === 'audio') {
       status: 'processing',
       progress: data.progress ?? null,
       raw: data,
+    })
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // VIDEO: BATCH-STATUS (poll all clips in a long-form batch)
+  // ────────────────────────────────────────────────────────────
+  if (action === 'batch-status') {
+    const { batchId } = body
+    if (!batchId) {
+      return NextResponse.json({ error: 'batchId is required' }, { status: 400 })
+    }
+
+    const { getGenerationByBatchId } = await import('@/lib/generation')
+    const batch = await getGenerationByBatchId(projectId, batchId)
+    if (!batch) {
+      return NextResponse.json({ error: 'Batch not found' }, { status: 404 })
+    }
+
+    const jobs = (batch.metadata?.jobs ?? []) as {
+      index: number
+      videoId?: string
+      error?: any
+    }[]
+
+    const results = await Promise.all(
+      jobs.map(async (job) => {
+        if (!job.videoId) {
+          return { index: job.index, status: 'failed', error: job.error ?? 'no videoId' }
+        }
+        const url = new URL(`${AGNES_BASE}/agnesapi`)
+        url.searchParams.set('video_id', job.videoId)
+        url.searchParams.set('model_name', batch.metadata?.model || 'agnes-video-v2.0')
+        const res = await fetch(url.toString(), {
+          headers: { Authorization: `Bearer ${process.env.AGNES_API_KEY}` },
+        })
+        const data = await res.json()
+        const finalUrl =
+          data.metadata?.url ?? data.url ?? data.video_url ?? data.output?.url ?? ''
+        const status = String(data.status ?? '').toLowerCase()
+        return { index: job.index, url: finalUrl, status, raw: data }
+      })
+    )
+
+    const isDone = (s: string) =>
+      s === 'completed' || s === 'succeeded' || s === 'success'
+    const isFailed = (s: string) =>
+      s === 'failed' || s === 'error' || s === 'cancelled' || s === 'canceled'
+
+    const completed = results.filter((r) => isDone(r.status) && r.url)
+    const failed = results.filter((r) => isFailed(r.status) || (!r.url && isDone(r.status)))
+
+    if (failed.length) {
+      return NextResponse.json({
+        status: 'failed',
+        failed,
+        completed: completed.length,
+        total: results.length,
+      })
+    }
+
+    if (completed.length === results.length) {
+      return NextResponse.json({
+        status: 'clips-ready',
+        clips: results.sort((a, b) => a.index - b.index).map((r) => r.url),
+        total: results.length,
+      })
+    }
+
+    return NextResponse.json({
+      status: 'processing',
+      progress: completed.length / results.length,
+      completed: completed.length,
+      total: results.length,
+      results,
     })
   }
 

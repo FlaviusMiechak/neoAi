@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Bell, Check, CreditCard, ExternalLink, RefreshCw } from 'lucide-react'
+import { useSearchParams } from 'next/navigation'
+import { Bell, Check, CreditCard, ExternalLink, RefreshCw, Smartphone } from 'lucide-react'
 
 interface PaymentRecord {
   id: string
@@ -30,7 +31,12 @@ function formatDate(value: string) {
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString()
 }
 
+const QUICK_AMOUNTS = [500, 1000, 2000, 5000]
+
 export default function AccountCommunications({ name }: { name: string }) {
+  const searchParams = useSearchParams()
+  const returnedRef = searchParams.get('ref')
+
   const [payments, setPayments] = useState<PaymentRecord[]>([])
   const [notifications, setNotifications] = useState<NotificationRecord[]>([])
   const [amount, setAmount] = useState('')
@@ -41,6 +47,11 @@ export default function AccountCommunications({ name }: { name: string }) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+
+  // Mobile Money state
+  const [momoAmount, setMomoAmount] = useState('1000')
+  const [momoPhone, setMomoPhone] = useState('657839786')
+  const [momoLoading, setMomoLoading] = useState(false)
 
   async function loadAccountData() {
     setLoading(true)
@@ -68,6 +79,50 @@ export default function AccountCommunications({ name }: { name: string }) {
   useEffect(() => {
     void loadAccountData()
   }, [])
+
+  // If we came back from Notch Pay, refresh after a short delay so the webhook
+  // has time to flip the row from pending → confirmed.
+  useEffect(() => {
+    if (!returnedRef) return
+    setMessage(`Checking status for ${returnedRef}…`)
+    const t = setTimeout(() => void loadAccountData(), 2500)
+    return () => clearTimeout(t)
+  }, [returnedRef])
+
+  async function payWithMobileMoney(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setMomoLoading(true)
+    setError('')
+    setMessage('')
+
+    const amountCents = Math.round(Number(momoAmount))
+    if (!Number.isFinite(amountCents) || amountCents < 1) {
+      setError('Enter a valid amount')
+      setMomoLoading(false)
+      return
+    }
+
+    try {
+      const response = await fetch('/api/payments', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amountCents,
+          currency: 'XAF',
+          phone: momoPhone.startsWith('+') ? momoPhone : `+237${momoPhone}`,
+          email: `${name.replace(/\s+/g, '.').toLowerCase()}@example.com`,
+          name,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Could not start payment')
+      // Hand off to Notch Pay's hosted checkout
+      window.location.href = result.authorizationUrl
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not start payment')
+      setMomoLoading(false)
+    }
+  }
 
   async function submitPayment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -130,9 +185,75 @@ export default function AccountCommunications({ name }: { name: string }) {
 
         <div className="grid gap-12 py-8 lg:grid-cols-[0.9fr_1.1fr]">
           <section>
+            {/* ===== NEW: Automatic Mobile Money via Notch Pay ===== */}
             <div className="mb-5 flex items-center gap-2">
+              <Smartphone aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-base font-semibold">Pay with Mobile Money</h2>
+            </div>
+
+            <form onSubmit={payWithMobileMoney} className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
+              <p className="text-xs text-muted-foreground">
+                MTN / Orange — verified automatically. You&apos;ll be redirected to Notch Pay to approve on your phone.
+              </p>
+
+              <div>
+                <p className="mb-2 text-sm font-medium">Quick amount (XAF)</p>
+                <div className="flex flex-wrap gap-2">
+                  {QUICK_AMOUNTS.map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setMomoAmount(String(value))}
+                      className={`h-9 rounded-md border px-3 text-sm ${momoAmount === String(value) ? 'border-primary bg-primary text-primary-foreground' : 'border-border hover:bg-muted'}`}
+                    >
+                      {value.toLocaleString()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label className="block text-sm font-medium">
+                Amount (XAF)
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  required
+                  value={momoAmount}
+                  onChange={(event) => setMomoAmount(event.target.value)}
+                  className="mt-2 h-10 w-full rounded-md border border-border bg-background px-3 font-normal outline-none focus:ring-2 focus:ring-ring"
+                />
+              </label>
+
+              <label className="block text-sm font-medium">
+                Mobile money number
+                <input
+                  type="tel"
+                  required
+                  value={momoPhone}
+                  onChange={(event) => setMomoPhone(event.target.value)}
+                  placeholder="6XXXXXXXX"
+                  className="mt-2 h-10 w-full rounded-md border border-border bg-background px-3 font-normal outline-none focus:ring-2 focus:ring-ring"
+                />
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  Cameroon numbers only. We&apos;ll prefix +237 automatically.
+                </span>
+              </label>
+
+              <button
+                type="submit"
+                disabled={momoLoading}
+                className="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {momoLoading ? 'Starting…' : 'Pay now'}
+                {!momoLoading && <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />}
+              </button>
+            </form>
+
+            {/* ===== Existing manual submission ===== */}
+            <div className="mt-9 mb-5 flex items-center gap-2">
               <CreditCard aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-base font-semibold">Submit a payment</h2>
+              <h2 className="text-base font-semibold">Submit a payment manually</h2>
             </div>
             <form onSubmit={submitPayment} className="space-y-4">
               <div className="grid grid-cols-[1fr_110px] gap-3">

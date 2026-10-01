@@ -1,3 +1,4 @@
+//app/page.tsx
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth'
 import AccountCommunications from './AccountCommunications'

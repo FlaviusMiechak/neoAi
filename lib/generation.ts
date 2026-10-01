@@ -5,7 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 // Types
 // ─────────────────────────────────────────────────────────────
 
-export type GenerationMode = 'text' | 'image' | 'audio' | 'video' | 'chat'
+export type GenerationMode = 'text' | 'image' | 'audio' | 'video' | 'chat'|'video-batch'
 
 export interface Generation {
   id: string
@@ -194,4 +194,22 @@ export async function getGenerationById(id: string): Promise<Generation | null> 
     return null
   }
   return data as Generation
+}
+
+export async function getGenerationByBatchId(
+  projectId: string,
+  batchId: string
+): Promise<Generation | null> {
+  const all = await getProjectGenerations(projectId)
+
+  return (
+    all.find((g) => {
+      if (!g.metadata) return false
+      try {
+        return JSON.parse(g.metadata).batchId === batchId
+      } catch {
+        return false
+      }
+    }) ?? null
+  )
 }

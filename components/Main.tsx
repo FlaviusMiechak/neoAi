@@ -1,4 +1,3 @@
-
 'use client'
 
 import {
@@ -7,7 +6,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { useAgnes } from '@/components/AgnesProvider'
+import { useAgnes, type ChatMessage } from '@/components/AgnesProvider'
 
 const SUGGESTIONS = [
   'Write a product launch tweet',
@@ -127,7 +126,7 @@ export default function Main() {
 
           <div>
             <h1 className="text-sm font-semibold text-white">
-              Agnes
+              Veo1
             </h1>
             <p className="text-[10px] text-white/40">
               AI Assistant
@@ -257,11 +256,6 @@ export default function Main() {
 }
 
 /* ---------- Message components ---------- */
-
-type ChatMessage = {
-  role: 'user' | 'assistant'
-  content: string
-}
 
 function MessageBubble({
   message,

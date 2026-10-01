@@ -1,3 +1,4 @@
+// components/AgnesProvider.tsx
 'use client'
 
 import {
@@ -11,7 +12,17 @@ import {
   useState,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { agnesStream, agnesOnce, type AgnesMessage } from '@/lib/agnes'
+import { useRouter } from 'next/navigation'
+import {
+  agnesStream,
+  agnesOnce,
+  type AgnesMessage,
+} from '@/lib/agnes'
+import type { ToolCall } from '@/lib/agnesTools'
+import { SITE_FEATURES, SITE_ROUTES } from '@/lib/siteMap'
+
+// Re-export AgnesMessage under the name Main.tsx expects.
+export type ChatMessage = AgnesMessage
 
 export type TourStep = {
   id: string
@@ -37,39 +48,38 @@ type AgnesContextValue = {
   nextStep: () => void
   prevStep: () => void
   skipTour: () => void
+
+  // PATCH: exposed so the assistant (and any component) can drive the UI.
+  navigate: (path: string) => void
+  highlight: (selector: string) => void
 }
 
 const AgnesContext = createContext<AgnesContextValue | null>(null)
 AgnesContext.displayName = 'AgnesContext'
 
+// PATCH: build the default tour from the site map so it always
+// covers every route and feature. Add to lib/siteMap.ts — not here.
 const DEFAULT_TOUR: TourStep[] = [
   {
     id: 'welcome',
     title: "Hi, I'm Agnes 👋",
-    body: "I'll show you around in a few quick steps. You can talk to me any time from the chat panel on the right.",
+    body: "I'll show you around the whole site in a few quick steps. You can talk to me any time from the chat panel on the right.",
     placement: 'center',
   },
-  {
-    id: 'sidebar',
-    target: '[data-tour="sidebar"]',
-    title: 'Your sidebar',
-    body: 'Switch between modes here — text, image, audio, video, and chat.',
-    placement: 'right',
-  },
-  {
-    id: 'chat',
-    target: '[data-tour="chat-input"]',
-    title: 'Ask me anything',
-    body: 'Type here to start a conversation. I can help you draft, generate, and refine.',
-    placement: 'top',
-  },
-  {
-    id: 'account',
-    target: '[data-tour="account"]',
-    title: 'Your account',
-    body: 'Payments, notifications, and settings live here.',
+  ...SITE_FEATURES.map<TourStep>((f) => ({
+    id: f.id,
+    target: f.tourTarget,
+    title: f.name,
+    body: f.description,
     placement: 'bottom',
-  },
+  })),
+  ...SITE_ROUTES.filter((r) => r.tourTarget).map<TourStep>((r) => ({
+    id: `route-${r.path}`,
+    target: r.tourTarget,
+    title: `${r.name} — ${r.path}`,
+    body: r.description,
+    placement: 'right',
+  })),
 ]
 
 export function AgnesProvider({
@@ -81,6 +91,8 @@ export function AgnesProvider({
   tour?: TourStep[]
   autoStartForNewUsers?: boolean
 }) {
+  const router = useRouter()
+
   const [messages, setMessages] = useState<AgnesMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -112,6 +124,97 @@ export function AgnesProvider({
     setError(null)
   }, [stop])
 
+  // --- Tour controls (declared before send so handleTool can use them) ---
+  const startTour = useCallback(() => {
+    setTourStepIndex(0)
+    setTourOpen(true)
+  }, [])
+
+  const nextStep = useCallback(() => {
+    setTourStepIndex((i) => {
+      const nxt = i + 1
+      if (nxt >= tour.length) {
+        setTourOpen(false)
+        localStorage.setItem('agnes:tour:seen', '1')
+        return i
+      }
+      return nxt
+    })
+  }, [tour.length])
+
+  const prevStep = useCallback(() => {
+    setTourStepIndex((i) => Math.max(0, i - 1))
+  }, [])
+
+  const skipTour = useCallback(() => {
+    setTourOpen(false)
+    localStorage.setItem('agnes:tour:seen', '1')
+  }, [])
+
+  // --- PATCH: UI driver functions the assistant can invoke ---
+  const navigate = useCallback(
+    (path: string) => {
+      if (!path || typeof path !== 'string') return
+      router.push(path)
+    },
+    [router]
+  )
+
+  const highlight = useCallback((selector: string) => {
+    if (!selector || typeof selector !== 'string') return
+    const el = document.querySelector(selector) as HTMLElement | null
+    if (!el) return
+
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const prevTransition = el.style.transition
+    const prevShadow = el.style.boxShadow
+    el.style.transition = 'box-shadow 200ms ease'
+    el.style.boxShadow =
+      '0 0 0 3px #4d6bfe, 0 0 0 8px rgba(77,107,254,0.25)'
+    window.setTimeout(() => {
+      el.style.boxShadow = prevShadow
+      el.style.transition = prevTransition
+    }, 2000)
+  }, [])
+
+  // --- PATCH: execute a tool call from the model ---
+  const handleTool = useCallback(
+    (tool: ToolCall) => {
+      switch (tool.name) {
+        case 'start_full_tour':
+          startTour()
+          break
+
+        case 'start_tour_at': {
+          const stepId = tool.args?.stepId as string | undefined
+          const idx = stepId
+            ? tour.findIndex((s) => s.id === stepId)
+            : -1
+          if (idx >= 0) {
+            setTourStepIndex(idx)
+            setTourOpen(true)
+          } else {
+            startTour()
+          }
+          break
+        }
+
+        case 'navigate_to':
+          navigate(tool.args?.path as string)
+          break
+
+        case 'highlight_element':
+          highlight(tool.args?.selector as string)
+          break
+
+        default:
+          // Unknown tool — ignore silently.
+          break
+      }
+    },
+    [startTour, tour, navigate, highlight]
+  )
+
   const send = useCallback(
     async (content: string) => {
       const trimmed = content.trim()
@@ -119,38 +222,60 @@ export function AgnesProvider({
 
       setError(null)
       const userMsg: AgnesMessage = { role: 'user', content: trimmed }
-      const assistantIndex = messages.length + 1
 
-      setMessages((prev) => [
-        ...prev,
-        userMsg,
-        { role: 'assistant', content: '' },
-      ])
+      const history = messages
+      const next = [...history, userMsg]
+      const assistantIndex = next.length
+
+      setMessages([...next, { role: 'assistant', content: '' }])
       setIsStreaming(true)
 
       const controller = new AbortController()
       abortRef.current = controller
 
       await agnesStream(
-        [...messages, userMsg],
+        next,
         {
           onToken: (full) => {
             setMessages((prev) => {
               const copy = [...prev]
-              copy[assistantIndex] = { role: 'assistant', content: full }
+              copy[assistantIndex] = {
+                role: 'assistant',
+                content: full,
+              }
               return copy
             })
           },
-          onDone: () => setIsStreaming(false),
+          // PATCH: forward tool calls to the UI driver.
+          onTool: handleTool,
+          onDone: () => {
+            setIsStreaming(false)
+            abortRef.current = null
+          },
           onError: (err) => {
             setError(err.message)
             setIsStreaming(false)
+            abortRef.current = null
+            setMessages((prev) => {
+              const copy = [...prev]
+              if (
+                copy[assistantIndex] &&
+                copy[assistantIndex].role === 'assistant' &&
+                copy[assistantIndex].content === ''
+              ) {
+                copy[assistantIndex] = {
+                  role: 'assistant',
+                  content: `⚠️ ${err.message}`,
+                }
+              }
+              return copy
+            })
           },
         },
         controller.signal
       )
     },
-    [messages]
+    [messages, handleTool]
   )
 
   const sendOnce = useCallback(
@@ -170,33 +295,6 @@ export function AgnesProvider({
     [messages]
   )
 
-  // --- Tour controls ---
-  const startTour = useCallback(() => {
-    setTourStepIndex(0)
-    setTourOpen(true)
-  }, [])
-
-  const nextStep = useCallback(() => {
-    setTourStepIndex((i) => {
-      const next = i + 1
-      if (next >= tour.length) {
-        setTourOpen(false)
-        localStorage.setItem('agnes:tour:seen', '1')
-        return i
-      }
-      return next
-    })
-  }, [tour.length])
-
-  const prevStep = useCallback(() => {
-    setTourStepIndex((i) => Math.max(0, i - 1))
-  }, [])
-
-  const skipTour = useCallback(() => {
-    setTourOpen(false)
-    localStorage.setItem('agnes:tour:seen', '1')
-  }, [])
-
   const currentStep = tourOpen ? tour[tourStepIndex] ?? null : null
 
   const value = useMemo<AgnesContextValue>(
@@ -215,6 +313,8 @@ export function AgnesProvider({
       nextStep,
       prevStep,
       skipTour,
+      navigate,
+      highlight,
     }),
     [
       messages,
@@ -231,6 +331,8 @@ export function AgnesProvider({
       nextStep,
       prevStep,
       skipTour,
+      navigate,
+      highlight,
     ]
   )
 
@@ -306,13 +408,14 @@ function TourOverlay() {
     }
 
     const tryFind = () => {
-      const el = document.querySelector(currentStep.target!) as HTMLElement | null
+      const el = document.querySelector(
+        currentStep.target!
+      ) as HTMLElement | null
       if (el) {
         attach(el)
       } else if (attempts++ < 30) {
         raf = requestAnimationFrame(tryFind)
       } else {
-        // Give up — advance to the next step
         nextStep()
       }
     }
@@ -346,14 +449,14 @@ function TourOverlay() {
 
   const pad = 8
 
-  // ---- Bubble position ----
   const bubbleWidth = 320
   const bubbleHeightEstimate = 200
   const gap = 16
   const vw = window.innerWidth
   const vh = window.innerHeight
 
-  const clampX = (x: number) => Math.min(Math.max(x, 12), vw - bubbleWidth - 12)
+  const clampX = (x: number) =>
+    Math.min(Math.max(x, 12), vw - bubbleWidth - 12)
   const clampY = (y: number) =>
     Math.min(Math.max(y, 12), vh - bubbleHeightEstimate - 12)
 
@@ -394,7 +497,6 @@ function TourOverlay() {
 
   const overlay = (
     <div className="fixed inset-0 z-[9999]">
-      {/* Dim + spotlight — non-interactive */}
       <div className="pointer-events-none absolute inset-0">
         {rect ? (
           <div
@@ -412,7 +514,6 @@ function TourOverlay() {
         )}
       </div>
 
-      {/* Click-catcher — closes on outside click */}
       <button
         type="button"
         aria-label="Close tour"
@@ -421,7 +522,6 @@ function TourOverlay() {
         className="absolute inset-0 cursor-default"
       />
 
-      {/* Bubble — interactive */}
       <div
         ref={bubbleRef}
         role="dialog"
