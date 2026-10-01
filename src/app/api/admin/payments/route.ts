@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
-import { isAdminEmail } from '@/lib/admin'
+import { isAdmin } from '@/lib/auth/admin'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 
 export const dynamic = 'force-dynamic'
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 async function requireAdmin() {
   const user = await getCurrentUser()
   if (!user) return { user: null, response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
-  if (!isAdminEmail(user.email)) return { user: null, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+  if (!(await isAdmin(user.id))) return { user: null, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
   return { user, response: null }
 }
 

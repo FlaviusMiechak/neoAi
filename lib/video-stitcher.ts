@@ -24,7 +24,7 @@ interface StitchOpts {
 }
 
 export const TARGET_DURATION_SEC = 10 * 60 // 6 minutes
-export const CLIP_DURATION_SEC = 18        // ~num_frames 441 @ 24fps
+export const CLIP_DURATION_SEC = 600        // ~num_frames 441 @ 24fps
 
 export function shotCountForTarget(targetSec = TARGET_DURATION_SEC) {
   // Round up, add a small buffer

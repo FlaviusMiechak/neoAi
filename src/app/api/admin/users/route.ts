@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
-import { isAdminEmail } from '@/lib/admin'
+import { isAdmin } from '@/lib/auth/admin'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 
 export const dynamic = 'force-dynamic'
@@ -11,7 +11,7 @@ async function requireAdmin() {
     return { user: null, response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   }
 
-  if (!isAdminEmail(user.email)) {
+  if (!(await isAdmin(user.id))) {
     return { user: null, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
   }
 
@@ -57,7 +57,7 @@ export async function DELETE(request: NextRequest) {
 
   const { data: target, error: lookupError } = await supabaseAdmin
     .from('users')
-    .select('id, email')
+    .select('id, email, role')
     .eq('id', userId)
     .maybeSingle()
 
@@ -70,7 +70,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 })
   }
 
-  if (isAdminEmail(target.email)) {
+  if (target.role === 'admin') {
     return NextResponse.json({ error: 'Admin accounts cannot be deleted here' }, { status: 400 })
   }
 

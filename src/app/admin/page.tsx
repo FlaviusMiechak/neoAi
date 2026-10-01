@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth'
-import { isAdminEmail } from '@/lib/admin'
+import { isAdmin } from '@/lib/auth/admin'
 import AdminUsersPanel from './AdminUsersPanel';
 
 export const dynamic = 'force-dynamic'
@@ -12,7 +12,7 @@ export default async function AdminPage() {
     redirect('/auth/login?next=%2Fadmin')
   }
 
-  if (!isAdminEmail(user.email)) {
+  if (!(await isAdmin(user.id))) {
     notFound()
   }
 

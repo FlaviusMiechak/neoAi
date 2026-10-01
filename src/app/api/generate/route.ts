@@ -670,7 +670,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Batch not found' }, { status: 404 })
     }
 
-    const jobs = (batch.metadata?.jobs ?? []) as {
+    const metadata = typeof batch.metadata === 'string'
+      ? JSON.parse(batch.metadata)
+      : batch.metadata
+    const jobs = (metadata?.jobs ?? []) as {
       index: number
       videoId?: string
       error?: any
@@ -683,7 +686,7 @@ export async function POST(request: NextRequest) {
         }
         const url = new URL(`${AGNES_BASE}/agnesapi`)
         url.searchParams.set('video_id', job.videoId)
-        url.searchParams.set('model_name', batch.metadata?.model || 'agnes-video-v2.0')
+        url.searchParams.set('model_name', metadata?.model || 'agnes-video-v2.0')
         const res = await fetch(url.toString(), {
           headers: { Authorization: `Bearer ${process.env.AGNES_API_KEY}` },
         })

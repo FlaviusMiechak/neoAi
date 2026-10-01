@@ -42,7 +42,6 @@ function verifyPassword(password: string, stored: string): boolean {
 // ─────────────────────────────────────────────────────────────
 // Signup
 // ─────────────────────────────────────────────────────────────
-
 export async function signup(
   email: string,
   password: string,
@@ -71,6 +70,7 @@ export async function signup(
       email: normalizedEmail,
       name: name ?? null,
       password_hash,
+      role: 'user',
     })
 
   if (insertError) throw new Error(insertError.message)

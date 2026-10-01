@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import { getCurrentUser } from '@/lib/auth'
-import { isAdminEmail } from '@/lib/admin'
+import { isAdmin } from '@/lib/auth/admin'
 import { sendNotificationEmail } from '@/lib/notifications'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 export async function POST(request: NextRequest) {
   const admin = await getCurrentUser()
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!isAdminEmail(admin.email)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!(await isAdmin(admin.id))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   let body: { userId?: string; allUsers?: boolean; title?: string; message?: string; sendEmail?: boolean }
   try {
