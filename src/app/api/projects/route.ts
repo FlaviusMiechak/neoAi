@@ -9,8 +9,8 @@ export const dynamic = 'force-dynamic'
 // GET /api/projects
 // Returns every project owned by the current user.
 // ─────────────────────────────────────────────────────────────
-export async function GET(_request: NextRequest) {
-  const userId = await getUserIdFromRequest()
+export async function GET(request: NextRequest) {
+  const userId = await getUserIdFromRequest(request)
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -25,7 +25,7 @@ export async function GET(_request: NextRequest) {
 // Body: { name: string, description?: string }
 // ─────────────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
-  const userId = await getUserIdFromRequest()
+  const userId = await getUserIdFromRequest(request)
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }

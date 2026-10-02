@@ -144,7 +144,7 @@ function buildCharacterCastPrompt(
 
 export async function POST(request: NextRequest) {
   // ── 1. Auth ────────────────────────────────────────────────
-  const userId = await getUserIdFromRequest()
+  const userId = await getUserIdFromRequest(request)
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }

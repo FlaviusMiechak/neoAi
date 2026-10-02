@@ -13,6 +13,14 @@ export interface User {
   createdAt: string
 }
 
+interface LoginRecord {
+  id: string
+  email: string
+  name: string | null
+  password_hash: string
+  created_at: string
+}
+
 // ─────────────────────────────────────────────────────────────
 // Password hashing (scrypt, built-in) — unchanged
 // ─────────────────────────────────────────────────────────────
@@ -87,7 +95,7 @@ export async function signup(
 // Login
 // ─────────────────────────────────────────────────────────────
 
-export async function login(email: string, password: string): Promise<User> {
+async function authenticateCredentials(email: string, password: string) {
   const normalizedEmail = email.trim().toLowerCase()
 
   const { data: rows, error: lookupError } = await supabaseAdmin
@@ -104,6 +112,10 @@ export async function login(email: string, password: string): Promise<User> {
     throw new Error('Invalid credentials')
   }
 
+  return user as LoginRecord
+}
+
+async function createSession(userId: string) {
   const token = crypto.randomBytes(32).toString('hex')
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000)
 
@@ -111,12 +123,28 @@ export async function login(email: string, password: string): Promise<User> {
     .from('sessions')
     .insert({
       id: crypto.randomUUID(),
-      user_id: user.id,
+      user_id: userId,
       token,
       expires_at: expiresAt.toISOString(),
     })
 
   if (sessionError) throw new Error(sessionError.message)
+
+  return { token, expiresAt }
+}
+
+function toPublicUser(user: LoginRecord): User {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name ?? undefined,
+    createdAt: new Date(user.created_at).toISOString(),
+  }
+}
+
+export async function login(email: string, password: string): Promise<User> {
+  const user = await authenticateCredentials(email, password)
+  const { token, expiresAt } = await createSession(user.id)
 
   const cookieStore = await cookies()
   cookieStore.set(SESSION_COOKIE, token, {
@@ -127,11 +155,20 @@ export async function login(email: string, password: string): Promise<User> {
     expires: expiresAt,
   })
 
+  return toPublicUser(user)
+}
+
+export async function loginForMobile(
+  email: string,
+  password: string
+): Promise<{ user: User; accessToken: string; expiresAt: string }> {
+  const user = await authenticateCredentials(email, password)
+  const { token, expiresAt } = await createSession(user.id)
+
   return {
-    id: user.id,
-    email: user.email,
-    name: user.name ?? undefined,
-    createdAt: new Date(user.created_at).toISOString(),
+    user: toPublicUser(user),
+    accessToken: token,
+    expiresAt: expiresAt.toISOString(),
   }
 }
 
@@ -154,8 +191,10 @@ export async function logout(): Promise<void> {
 // Session lookup (for API routes)
 // ─────────────────────────────────────────────────────────────
 
-export async function getUserIdFromRequest(): Promise<string | null> {
-  const sessionToken = (await cookies()).get(SESSION_COOKIE)?.value
+export async function getUserIdFromRequest(request?: Request): Promise<string | null> {
+  const authorization = request?.headers.get('authorization')
+  const bearerToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim()
+  const sessionToken = bearerToken ?? (await cookies()).get(SESSION_COOKIE)?.value
   if (!sessionToken) return null
 
   const { data, error } = await supabaseAdmin
